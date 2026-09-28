@@ -1,7 +1,7 @@
 # mflux-web settings file.
 # All keys are optional; the built-in defaults apply otherwise.
 # Precedence: command line (--flag) > this YAML file > built-in defaults.
-# Path: ~/.config/mflux/mflux-web.yaml (or set MFLUX_WEB_YAML, or pass --yaml <path>).
+# Path: --yaml <path>, else MFLUX_WEB_YAML, else ./mflux-web.yaml, else ~/.config/mflux/mflux-web.yaml.
 
 # --- server -------------------------------------------------------------------
 

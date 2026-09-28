@@ -9,7 +9,8 @@ from mflux.web.seed.settings import DEFAULT_CONFIG_PATH, DEFAULT_HOST, DEFAULT_O
 
 INSTALL_HINT = "mflux-web is missing a dependency; reinstall it: uv tool install --force mflux-web-seed"
 
-DEFAULT_YAML_PATH = Path(os.environ.get("MFLUX_WEB_YAML", str(Path.home() / ".config" / "mflux" / "mflux-web.yaml")))
+LOCAL_YAML_NAME = "mflux-web.yaml"
+USER_YAML_PATH = Path.home() / ".config" / "mflux" / LOCAL_YAML_NAME
 
 # CLI (--x) > YAML (x) > built-in defaults. The parser keeps explicit
 # defaults below ONLY for --config (a state file, not a setting) and for the
@@ -55,11 +56,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--behind-https", action=argparse.BooleanOptionalAction, default=None, help="A TLS-terminating proxy sits in front: mark session cookies Secure. YAML: behind_https: true/false.")  # fmt: off
     parser.add_argument("--max-upload-mb", type=int, default=None, help="Largest init image accepted (default: 50).")
     parser.add_argument("--config", type=Path, default=Path(os.environ.get("MFLUX_WEB_CONFIG", DEFAULT_CONFIG_PATH)), help=f"State file for the session secret and a first-run key (default: {DEFAULT_CONFIG_PATH}). Not read from YAML.")  # fmt: off
-    parser.add_argument("--yaml", type=Path, default=None, help=f"YAML settings file (default: {DEFAULT_YAML_PATH} if it exists). Command-line options override YAML values.")  # fmt: off
+    parser.add_argument("--yaml", type=Path, default=None, help=f"YAML settings file. Without it: $MFLUX_WEB_YAML, else ./{LOCAL_YAML_NAME}, else {USER_YAML_PATH}, if it exists. Command-line options override YAML values.")  # fmt: off
     parser.add_argument(
         "--log-level", default=None, choices=LOG_LEVELS, help="debug | info | warning | error (default: info)."
     )
     return parser
+
+
+def find_yaml(cli_path: Path | None, environ, cwd: Path) -> Path | None:
+    """Pick the YAML file: --yaml, then MFLUX_WEB_YAML, then ./mflux-web.yaml, then ~/.config/mflux/mflux-web.yaml.
+
+    A file named by --yaml or MFLUX_WEB_YAML must exist. The two default locations are optional.
+    """
+    explicit = cli_path or (Path(environ["MFLUX_WEB_YAML"]) if environ.get("MFLUX_WEB_YAML") else None)
+    if explicit is not None:
+        explicit = explicit.expanduser()
+        if not explicit.is_file():
+            raise SystemExit(f"mflux-web: YAML settings file not found: {explicit}")
+        return explicit
+    return next((path for path in (cwd / LOCAL_YAML_NAME, USER_YAML_PATH) if path.is_file()), None)
 
 
 def load_yaml(yaml_path: Path | None) -> dict:
@@ -216,7 +231,8 @@ def main() -> None:
         parser.exit(1, f"{INSTALL_HINT}\n({exc})\n")
 
     cli_args = argparse.Namespace(**vars(args))
-    yaml_values = load_yaml(args.yaml if args.yaml is not None else DEFAULT_YAML_PATH)
+    yaml_path = find_yaml(args.yaml, os.environ, Path.cwd())
+    yaml_values = load_yaml(yaml_path)
     args = merge_settings(args, yaml_values)
 
     if (args.tls_cert is None) != (args.tls_key is None):
@@ -252,7 +268,7 @@ def main() -> None:
         parser.exit(2, f"mflux-web: {problem}\n")
 
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    print(WebCli.banner(settings), file=sys.stderr)
+    print(WebCli.banner(settings, yaml_path), file=sys.stderr)
     config = uvicorn.Config(
         WebApp(settings).app,
         host=settings.host,
@@ -297,10 +313,14 @@ class QuietAccessLog(logging.Filter):
 
 class WebCli:
     @staticmethod
-    def banner(settings: WebSettings) -> str:
+    def banner(settings: WebSettings, yaml_path: Path | None = None) -> str:
         scheme = "https" if settings.tls_certfile else "http"
         shown_host = "127.0.0.1" if settings.host in ("0.0.0.0", "::") else settings.host
-        lines = [f"mflux-web: {scheme}://{shown_host}:{settings.port}", f"  outputs: {settings.output_dir}"]
+        lines = [
+            f"mflux-web: {scheme}://{shown_host}:{settings.port}",
+            f"  settings: {yaml_path or 'none (no YAML file found)'}",
+            f"  outputs: {settings.output_dir}",
+        ]
         unload = (
             f"after {settings.idle_unload_minutes:g} idle min"
             if settings.idle_unload_minutes

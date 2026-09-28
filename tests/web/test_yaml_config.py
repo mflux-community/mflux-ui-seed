@@ -8,7 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from mflux.web.seed.cli import build_parser, coerce_value, load_yaml, merge_settings, resolve_api_key, strip_comment
+from mflux.web.seed.cli import (
+    USER_YAML_PATH,
+    build_parser,
+    coerce_value,
+    find_yaml,
+    load_yaml,
+    merge_settings,
+    resolve_api_key,
+    strip_comment,
+)
 
 YAML_FULL = """\
 host: 192.168.1.50
@@ -205,3 +214,33 @@ class TestApiKeyPrecedence:
 
     def test_no_key(self) -> None:
         assert self.resolve([], {}, {}) is None
+
+
+class TestFindYaml:
+    def test_cli_path_wins(self, tmp_path: Path) -> None:
+        (tmp_path / "mflux-web.yaml").write_text("port: 1\n")
+        chosen = tmp_path / "chosen.yaml"
+        chosen.write_text("port: 2\n")
+        assert find_yaml(chosen, {"MFLUX_WEB_YAML": str(tmp_path / "mflux-web.yaml")}, tmp_path) == chosen
+
+    def test_environment_beats_working_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "mflux-web.yaml").write_text("port: 1\n")
+        env_file = tmp_path / "env.yaml"
+        env_file.write_text("port: 2\n")
+        assert find_yaml(None, {"MFLUX_WEB_YAML": str(env_file)}, tmp_path) == env_file
+
+    def test_working_directory_file_is_found(self, tmp_path: Path) -> None:
+        local = tmp_path / "mflux-web.yaml"
+        local.write_text("port: 1\n")
+        assert find_yaml(None, {}, tmp_path) == local
+
+    def test_user_config_is_the_fallback(self, tmp_path: Path) -> None:
+        expected = USER_YAML_PATH if USER_YAML_PATH.is_file() else None
+        assert find_yaml(None, {}, tmp_path) == expected
+
+    @pytest.mark.parametrize("source", ["cli", "env"])
+    def test_missing_explicit_file_is_an_error(self, tmp_path: Path, source: str) -> None:
+        missing = tmp_path / "missing.yaml"
+        cli_path, environ = (missing, {}) if source == "cli" else (None, {"MFLUX_WEB_YAML": str(missing)})
+        with pytest.raises(SystemExit, match="not found"):
+            find_yaml(cli_path, environ, tmp_path)

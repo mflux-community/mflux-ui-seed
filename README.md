@@ -50,11 +50,11 @@ just run --help               # full option list
 To keep your settings in a file, copy the example settings file. Then remove the `#` from the settings that you want to change:
 
 ```bash
-mkdir -p ~/.config/mflux
-cp mflux-web.example.yaml ~/.config/mflux/mflux-web.yaml
+cp mflux-web.example.yaml mflux-web.yaml                           # this folder only
+mkdir -p ~/.config/mflux && cp mflux-web.example.yaml ~/.config/mflux/mflux-web.yaml  # all folders
 ```
 
-Command-line options override the values in this file.
+The server uses the first file that it finds: the `--yaml` path, then `MFLUX_WEB_YAML`, then `./mflux-web.yaml`, then `~/.config/mflux/mflux-web.yaml`. The startup message shows the file that the server uses. Command-line options override the values in the file.
 
 Build a publishable wheel/sdist:
 
